@@ -5,6 +5,7 @@ import threading
 import time
 import re
 import os
+from datetime import datetime
 
 # =========================
 # إعدادات البوت
@@ -16,7 +17,8 @@ bot = telebot.TeleBot(TOKEN)
 
 # =========================
 # قاعدة بيانات المستخدمين
-users = {}  # {user_id: {'points': int, 'invited': int, 'tiktok': False, 'current_action': None, 'daily_claimed': False}}
+users = {}  
+# {user_id: {'points': int, 'invited': int, 'tiktok': False, 'current_action': None, 'last_daily': str}}
 
 # =========================
 # قائمة رئيسية
@@ -24,7 +26,7 @@ def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("📥 تحميل فيديو", "🎵 استخراج صوت")
     markup.add("👥 دعوة صديق", "🎯 تيكتوك")
-    if uid == DEVELOPER_ID:  # لوحة المطور تظهر فقط لك
+    if uid == DEVELOPER_ID:
         markup.add("👑 لوحة المطور")
     return markup
 
@@ -32,24 +34,7 @@ def menu(uid):
 # التحقق من المستخدم
 def check_user(uid):
     if uid not in users:
-        users[uid] = {'points': 5, 'invited': 0, 'tiktok': False, 'current_action': None, 'daily_claimed': False}
-
-# =========================
-# إعطاء نقطة يومية
-def daily_points():
-    while True:
-        for uid in users:
-            if not users[uid]['daily_claimed']:
-                users[uid]['points'] += 1
-                try:
-                    bot.send_message(uid, "🔹 تم إضافة نقطة يومية لمستخدمك!")
-                except:
-                    pass
-                users[uid]['daily_claimed'] = True
-        # إعادة ضبط كل يوم (86400 ثانية)
-        time.sleep(86400)
-        for uid in users:
-            users[uid]['daily_claimed'] = False
+        users[uid] = {'points': 5, 'invited': 0, 'tiktok': False, 'current_action': None, 'last_daily': None}
 
 # =========================
 # إضافة نقاط تيكتوك
@@ -58,6 +43,23 @@ def add_tiktok_points(uid):
     users[uid]['points'] += 4
     users[uid]['tiktok'] = True
     bot.send_message(uid, f"✅ تمت إضافة 4 نقاط لاشتراكك في تيكتوك!\n🔹 نقاطك: {users[uid]['points']}")
+
+# =========================
+# الهديه اليومية
+def give_daily_points():
+    while True:
+        now = datetime.now().strftime("%Y-%m-%d")
+        for uid in users:
+            if users[uid]['last_daily'] != now:
+                users[uid]['points'] += 1
+                users[uid]['last_daily'] = now
+                try:
+                    bot.send_message(uid, f"🎁 حصلت على نقطة يومية!\n🔹 نقاطك: {users[uid]['points']}")
+                except:
+                    pass
+        time.sleep(3600)  # تحقق كل ساعة
+
+threading.Thread(target=give_daily_points, daemon=True).start()
 
 # =========================
 # التحقق إذا النص رابط
@@ -73,48 +75,9 @@ def send_file(uid, filename):
                 bot.send_audio(uid, f)
             else:
                 bot.send_video(uid, f)
-        os.remove(filename)  # حذف الملف بعد الإرسال
+        os.remove(filename)
     except Exception as e:
         bot.send_message(uid, f"❌ لم أتمكن من إرسال الملف: {str(e)}")
-
-# =========================
-# خيارات yt-dlp
-def download_media(url, uid, action):
-    ydl_opts = {}
-    ffmpeg_path = '/usr/bin/ffmpeg'  # تأكد أنه موجود على السيرفر
-
-    if action == "📥 تحميل فيديو":
-        ydl_opts = {
-            'format': 'bestvideo+bestaudio/best',
-            'outtmpl': f'{uid}_%(title)s.%(ext)s',
-            'noplaylist': True,
-            'ffmpeg_location': ffmpeg_path
-        }
-    elif action == "🎵 استخراج صوت":
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'{uid}_%(title)s.%(ext)s',
-            'noplaylist': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'ffmpeg_location': ffmpeg_path
-        }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            if action == "🎵 استخراج صوت":
-                filename = filename.rsplit('.', 1)[0] + ".mp3"
-
-        users[uid]['points'] -= 1
-        bot.send_message(uid, f"✅ تمت العملية بنجاح!\n🔹 نقاطك الحالية: {users[uid]['points']}\n📁 جاري إرسال الملف...")
-        threading.Thread(target=send_file, args=(uid, filename)).start()
-    except Exception as e:
-        bot.send_message(uid, f"❌ خطأ في التحميل: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحميل.")
 
 # =========================
 # استقبال الرسائل
@@ -124,13 +87,11 @@ def handle(msg):
     text = msg.text
     check_user(uid)
 
-    # زر رجوع
     if text == "↩️ رجوع":
         bot.send_message(uid, "🔙 رجعت للقائمة الرئيسية", reply_markup=menu(uid))
         users[uid]['current_action'] = None
         return
 
-    # دعوة صديق
     if text == "👥 دعوة صديق":
         link = f"{CHANNEL}?start={uid}"
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -138,7 +99,6 @@ def handle(msg):
         bot.send_message(uid, f"رابط دعوتك:\n{link}\n🔹 نقاطك: {users[uid]['points']}", reply_markup=markup)
         return
 
-    # تيكتوك
     if text == "🎯 تيكتوك":
         if not users[uid]['tiktok']:
             bot.send_message(uid, f"🔗 هذا رابط تيكتوك الخاص بك: {TIKTOK_ACCOUNT}")
@@ -147,43 +107,55 @@ def handle(msg):
             bot.send_message(uid, "لقد استخدمت هذا الخيار من قبل!")
         return
 
-    # اختيار العملية
     if text in ["📥 تحميل فيديو", "🎵 استخراج صوت"]:
         users[uid]['current_action'] = text
         bot.send_message(uid, "أرسل رابط الفيديو الآن أو أرسل ملف الفيديو:", reply_markup=types.ReplyKeyboardMarkup().add("↩️ رجوع"))
         return
 
-    # إذا النص رابط فيديو
+    # تحميل الفيديو أو استخراج الصوت
     if text and is_url(text):
         action = users[uid]['current_action']
         if not action:
             bot.send_message(uid, "❌ الرجاء اختيار العملية أولاً.", reply_markup=menu(uid))
             return
-        threading.Thread(target=download_media, args=(text, uid, action)).start()
+
+        ydl_opts = {}
+        if action == "📥 تحميل فيديو":
+            ydl_opts = {
+                'format': 'bestvideo+bestaudio/best',
+                'outtmpl': f'{uid}_%(title)s.%(ext)s',
+                'noplaylist': True,
+            }
+        elif action == "🎵 استخراج صوت":
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': f'{uid}_%(title)s.%(ext)s',
+                'noplaylist': True,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+            }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(text, download=True)
+                filename = ydl.prepare_filename(info)
+                if action == "🎵 استخراج صوت":
+                    filename = filename.rsplit('.', 1)[0] + ".mp3"
+
+            users[uid]['points'] -= 1
+            bot.send_message(uid, f"✅ تمت العملية بنجاح!\n🔹 نقاطك الحالية: {users[uid]['points']}\n📁 جاري إرسال الملف...")
+            threading.Thread(target=send_file, args=(uid, filename)).start()
+
+        except Exception as e:
+            bot.send_message(uid, f"❌ خطأ في التحميل أو التحويل: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحويل.")
         users[uid]['current_action'] = None
         return
 
-    # استقبال فيديو من الجهاز
-    if msg.content_type == 'document':
-        file_info = bot.get_file(msg.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        filename = f"{uid}_{msg.document.file_name}"
-        with open(filename, 'wb') as f:
-            f.write(downloaded_file)
-        action = users[uid]['current_action']
-        if action == "🎵 استخراج صوت":
-            # تحويل الملف المرفوع إلى mp3 باستخدام ffmpeg
-            output_mp3 = filename.rsplit('.',1)[0]+".mp3"
-            os.system(f"ffmpeg -i {filename} -vn -ar 44100 -ac 2 -b:a 192k {output_mp3}")
-            bot.send_message(uid, f"✅ تم استخراج الصوت من الفيديو.")
-            threading.Thread(target=send_file, args=(uid, output_mp3)).start()
-        users[uid]['current_action'] = None
-        return
-
-    # أي نص غير معروف
     bot.send_message(uid, "❌ أمر غير صالح. الرجاء استخدام الأزرار فقط.", reply_markup=menu(uid))
 
 # =========================
 # بدء البوت
-threading.Thread(target=daily_points, daemon=True).start()  # بدء إضافة نقطة يومية
 bot.polling()
