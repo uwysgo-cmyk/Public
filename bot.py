@@ -11,6 +11,7 @@ import os
 TOKEN = "8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ"
 CHANNEL = "https://t.me/VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
+DEVELOPER_ID = 7100818250  # رقمك الخاص على تيليغرام
 bot = telebot.TeleBot(TOKEN)
 
 # =========================
@@ -23,7 +24,7 @@ def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("📥 تحميل فيديو", "🎵 استخراج صوت")
     markup.add("👥 دعوة صديق", "🎯 تيكتوك")
-    if str(uid) == "Anis_24_1":  # مطور
+    if uid == DEVELOPER_ID:  # لوحة المطور تظهر فقط لك
         markup.add("👑 لوحة المطور")
     return markup
 
@@ -105,11 +106,16 @@ def handle(msg):
 
         ydl_opts = {}
         if action == "📥 تحميل فيديو":
-            ydl_opts = {'format': 'best', 'outtmpl': f'{uid}_%(title)s.%(ext)s'}
+            ydl_opts = {
+                'format': 'bestvideo+bestaudio/best',
+                'outtmpl': f'{uid}_%(title)s.%(ext)s',
+                'noplaylist': True,
+            }
         elif action == "🎵 استخراج صوت":
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': f'{uid}_%(title)s.%(ext)s',
+                'noplaylist': True,
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -129,7 +135,7 @@ def handle(msg):
             threading.Thread(target=send_file, args=(uid, filename)).start()
 
         except Exception as e:
-            bot.send_message(uid, f"❌ خطأ في التحميل: {str(e)}")
+            bot.send_message(uid, f"❌ خطأ في التحميل: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحميل.")
         users[uid]['current_action'] = None
         return
 
