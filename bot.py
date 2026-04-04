@@ -5,22 +5,20 @@ import threading
 import time
 import re
 import os
+from datetime import datetime
 
 # =========================
-# إعدادات البوت
-TOKEN = "PUT_YOUR_TOKEN_HERE"
+# إعدادات
+TOKEN = os.getenv("TOKEN")
 CHANNEL = "https://t.me/VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
 DEVELOPER_ID = 7100818250
 
 bot = telebot.TeleBot(TOKEN)
 
-# =========================
-# قاعدة بيانات المستخدمين
 users = {}
 
 # =========================
-# قائمة
 def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("📥 تحميل فيديو", "🎵 استخراج صوت")
@@ -36,83 +34,109 @@ def check_user(uid):
             'points': 5,
             'tiktok': False,
             'current_action': None,
-            'daily': 0
+            'last_daily': None,
+            'downloads': 0,
+            'audios': 0
         }
 
 # =========================
-# هدية يومية (كل 24 ساعة)
-def daily_reward(uid):
-    now = time.time()
-    if now - users[uid]['daily'] > 86400:
-        users[uid]['points'] += 1
-        users[uid]['daily'] = now
-        bot.send_message(uid, f"🎁 حصلت على نقطة يومية!\n🔹 نقاطك: {users[uid]['points']}")
+# 🎁 هدية يومية
+def daily_points():
+    while True:
+        today = datetime.now().strftime("%Y-%m-%d")
+        for uid in users:
+            if users[uid]['last_daily'] != today:
+                users[uid]['points'] += 1
+                users[uid]['last_daily'] = today
+                try:
+                    bot.send_message(uid, "🎁 تم إضافة نقطة يومية!")
+                except:
+                    pass
+        time.sleep(3600)
+
+threading.Thread(target=daily_points, daemon=True).start()
 
 # =========================
 def is_url(text):
     return re.match(r'^https?://', text)
 
 # =========================
-# إرسال ملف
+# 🧠 حذف الملف بعد تأخير
+def delete_later(file):
+    time.sleep(120)  # دقيقتين
+    if os.path.exists(file):
+        os.remove(file)
+
+# =========================
 def send_file(uid, filename):
     try:
         with open(filename, "rb") as f:
             if filename.endswith(".mp3"):
                 bot.send_audio(uid, f)
+                users[uid]['audios'] += 1
             else:
                 bot.send_video(uid, f)
-        os.remove(filename)
+                users[uid]['downloads'] += 1
+
+        # حذف بعد تأخير
+        threading.Thread(target=delete_later, args=(filename,)).start()
+
     except Exception as e:
-        bot.send_message(uid, f"❌ خطأ في الإرسال: {str(e)}")
+        bot.send_message(uid, f"❌ خطأ إرسال الملف: {str(e)}")
 
 # =========================
-# استخراج صوت من فيديو مرفوع
-def extract_audio_from_file(uid, file_id):
+# 🎬 تحميل من رابط
+def download_media(url, uid, action):
+    bot.send_message(uid, "⏳ جاري المعالجة...")
+
+    ydl_opts = {
+        'outtmpl': f'{uid}_%(title)s.%(ext)s',
+        'noplaylist': True,
+        'ffmpeg_location': '/usr/bin/ffmpeg'
+    }
+
+    if action == "📥 تحميل فيديو":
+        ydl_opts['format'] = 'bestvideo+bestaudio/best'
+
+    elif action == "🎵 استخراج صوت":
+        bot.send_message(uid, "🎵 جاري استخراج الصوت...")
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }]
+        })
+
     try:
-        file_info = bot.get_file(file_id)
-        downloaded = bot.download_file(file_info.file_path)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
 
-        video_name = f"{uid}_input.mp4"
-        with open(video_name, "wb") as f:
-            f.write(downloaded)
+            if action == "🎵 استخراج صوت":
+                filename = filename.rsplit('.', 1)[0] + ".mp3"
 
-        audio_name = f"{uid}_audio.mp3"
-
-        os.system(f"ffmpeg -i {video_name} -vn -ab 192k {audio_name}")
-
-        bot.send_audio(uid, open(audio_name, "rb"))
-
-        os.remove(video_name)
-        os.remove(audio_name)
+        users[uid]['points'] -= 1
+        bot.send_message(uid, "✅ تم بنجاح، جاري الإرسال...")
+        send_file(uid, filename)
 
     except Exception as e:
-        bot.send_message(uid, f"❌ خطأ في تحويل الفيديو: {str(e)}")
+        bot.send_message(uid, f"❌ خطأ: {str(e)}")
 
 # =========================
-@bot.message_handler(content_types=['video'])
-def handle_video(msg):
-    uid = msg.from_user.id
-    check_user(uid)
-
-    if users[uid]['current_action'] == "🎵 استخراج صوت":
-        bot.send_message(uid, "⏳ جاري استخراج الصوت...")
-        threading.Thread(target=extract_audio_from_file, args=(uid, msg.video.file_id)).start()
-
-# =========================
-@bot.message_handler(func=lambda m: True)
+@bot.message_handler(func=lambda m: True, content_types=['text','document'])
 def handle(msg):
     uid = msg.from_user.id
     text = msg.text
     check_user(uid)
-    daily_reward(uid)
 
     if text == "↩️ رجوع":
-        bot.send_message(uid, "🔙 رجعت", reply_markup=menu(uid))
-        users[uid]['current_action'] = None
+        bot.send_message(uid, "🔙 رجوع", reply_markup=menu(uid))
         return
 
     if text == "👥 دعوة صديق":
-        bot.send_message(uid, f"رابطك:\n{CHANNEL}?start={uid}")
+        link = f"{CHANNEL}?start={uid}"
+        bot.send_message(uid, f"رابطك:\n{link}")
         return
 
     if text == "🎯 تيكتوك":
@@ -120,61 +144,65 @@ def handle(msg):
             bot.send_message(uid, TIKTOK_ACCOUNT)
             users[uid]['points'] += 4
             users[uid]['tiktok'] = True
-        else:
-            bot.send_message(uid, "❌ استعملتها سابقاً")
         return
 
     if text in ["📥 تحميل فيديو", "🎵 استخراج صوت"]:
         users[uid]['current_action'] = text
-        bot.send_message(uid, "📩 أرسل الرابط أو الفيديو")
+        bot.send_message(uid, "أرسل الرابط أو ملف فيديو")
         return
 
+    # 👑 لوحة المطور
+    if text == "👑 لوحة المطور" and uid == DEVELOPER_ID:
+        total_users = len(users)
+        total_points = sum(u['points'] for u in users.values())
+        total_downloads = sum(u['downloads'] for u in users.values())
+        total_audios = sum(u['audios'] for u in users.values())
+
+        msg_stats = f"""
+📊 إحصائيات:
+
+👤 المستخدمين: {total_users}
+💰 مجموع النقاط: {total_points}
+🎬 تحميل فيديو: {total_downloads}
+🎵 استخراج صوت: {total_audios}
+"""
+        bot.send_message(uid, msg_stats)
+        return
+
+    # 🔗 رابط
     if text and is_url(text):
         action = users[uid]['current_action']
         if not action:
-            bot.send_message(uid, "❌ اختر العملية أولاً", reply_markup=menu(uid))
+            bot.send_message(uid, "❌ اختر العملية أولاً")
             return
 
-        ydl_opts = {
-            'outtmpl': f'{uid}_%(title).50s.%(ext)s',
-            'noplaylist': True,
-            'ffmpeg_location': '/usr/bin/ffmpeg',
-
-            # 🔥 حل Instagram
-            'cookiefile': 'cookies.txt',
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0'
-            }
-        }
-
-        if action == "📥 تحميل فيديو":
-            ydl_opts['format'] = 'best'
-        else:
-            ydl_opts['format'] = 'bestaudio/best'
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192'
-            }]
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(text, download=True)
-                filename = ydl.prepare_filename(info)
-
-                if action == "🎵 استخراج صوت":
-                    filename = filename.rsplit('.', 1)[0] + ".mp3"
-
-            bot.send_message(uid, "✅ تم التحميل، جاري الإرسال...")
-            threading.Thread(target=send_file, args=(uid, filename)).start()
-
-        except Exception as e:
-            bot.send_message(uid, f"❌ خطأ: {str(e)}")
-
-        users[uid]['current_action'] = None
+        threading.Thread(target=download_media, args=(text, uid, action)).start()
         return
 
-    bot.send_message(uid, "❌ أمر غير صالح", reply_markup=menu(uid))
+    # 📁 فيديو من الجهاز
+    if msg.content_type == 'document':
+        action = users[uid]['current_action']
+
+        if action != "🎵 استخراج صوت":
+            bot.send_message(uid, "❌ اختر استخراج صوت أولاً")
+            return
+
+        bot.send_message(uid, "⏳ جاري استخراج الصوت من الفيديو...")
+
+        file_info = bot.get_file(msg.document.file_id)
+        file = bot.download_file(file_info.file_path)
+
+        filename = f"{uid}_video.mp4"
+        with open(filename, "wb") as f:
+            f.write(file)
+
+        output = f"{uid}_audio.mp3"
+
+        os.system(f"ffmpeg -i {filename} -vn -acodec libmp3lame {output}")
+
+        send_file(uid, output)
+
+        threading.Thread(target=delete_later, args=(filename,)).start()
 
 # =========================
 bot.polling()
