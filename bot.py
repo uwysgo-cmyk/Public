@@ -16,7 +16,9 @@ bot = telebot.TeleBot(TOKEN)
 
 # =========================
 # قاعدة بيانات المستخدمين
-users = {}  # {user_id: {'points': int, 'invited': int, 'tiktok': False, 'current_action': None}}
+users = {}  
+# {user_id: {'points': int, 'invited': int, 'tiktok': False, 'current_action': None,
+#            'last_daily': str, 'downloads': int, 'audios': int}}
 
 # =========================
 # قائمة رئيسية
@@ -24,7 +26,7 @@ def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("📥 تحميل فيديو", "🎵 استخراج صوت")
     markup.add("👥 دعوة صديق", "🎯 تيكتوك")
-    if uid == DEVELOPER_ID:  # لوحة المطور تظهر فقط لك
+    if uid == DEVELOPER_ID:
         markup.add("👑 لوحة المطور")
     return markup
 
@@ -32,7 +34,8 @@ def menu(uid):
 # التحقق من المستخدم
 def check_user(uid):
     if uid not in users:
-        users[uid] = {'points': 5, 'invited': 0, 'tiktok': False, 'current_action': None}
+        users[uid] = {'points': 5, 'invited': 0, 'tiktok': False, 'current_action': None,
+                      'last_daily': None, 'downloads': 0, 'audios': 0}
 
 # =========================
 # إضافة نقاط تيكتوك بعد 7 ثوانٍ
@@ -49,16 +52,33 @@ def is_url(text):
 
 # =========================
 # إرسال الملف بعد التحميل
-def send_file(uid, filename):
+def send_file(uid, filename, action_type):
     try:
         with open(filename, "rb") as f:
             if filename.endswith(".mp3"):
                 bot.send_audio(uid, f)
+                users[uid]['audios'] += 1
             else:
                 bot.send_video(uid, f)
-        os.remove(filename)  # حذف الملف بعد الإرسال للحفاظ على المساحة
+                users[uid]['downloads'] += 1
+        os.remove(filename)
     except Exception as e:
         bot.send_message(uid, f"❌ لم أتمكن من إرسال الملف: {str(e)}")
+
+# =========================
+# Daily Bonus
+def daily_bonus():
+    while True:
+        now_day = time.strftime("%Y-%m-%d")
+        for uid in users:
+            if 'last_daily' not in users[uid] or users[uid]['last_daily'] != now_day:
+                users[uid]['points'] += 1
+                users[uid]['last_daily'] = now_day
+                try:
+                    bot.send_message(uid, f"🎁 تم إضافة نقطة يومية!\nنقاطك الآن: {users[uid]['points']}")
+                except:
+                    pass
+        time.sleep(3600)
 
 # =========================
 # استقبال الرسائل
@@ -97,7 +117,7 @@ def handle(msg):
         bot.send_message(uid, "أرسل رابط الفيديو الآن أو أرسل ملف الفيديو:", reply_markup=types.ReplyKeyboardMarkup().add("↩️ رجوع"))
         return
 
-    # إذا النص رابط فيديو
+    # روابط فيديو
     if text and is_url(text):
         action = users[uid]['current_action']
         if not action:
@@ -132,16 +152,25 @@ def handle(msg):
 
             users[uid]['points'] -= 1
             bot.send_message(uid, f"✅ تمت العملية بنجاح!\n🔹 نقاطك الحالية: {users[uid]['points']}\n📁 جاري إرسال الملف...")
-            threading.Thread(target=send_file, args=(uid, filename)).start()
+            threading.Thread(target=send_file, args=(uid, filename, action)).start()
 
         except Exception as e:
             bot.send_message(uid, f"❌ خطأ في التحميل: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحميل.")
         users[uid]['current_action'] = None
         return
 
+    # لوحة المطور
+    if text == "👑 لوحة المطور" and uid == DEVELOPER_ID:
+        stats = "📊 إحصائيات المستخدمين اليومية:\n\n"
+        for u_id, data in users.items():
+            stats += f"👤 {u_id}\nنقاط: {data['points']}\nتحميل فيديو: {data['downloads']}\nاستخراج صوت: {data['audios']}\n\n"
+        bot.send_message(uid, stats)
+        return
+
     # أي نص غير معروف
     bot.send_message(uid, "❌ أمر غير صالح. الرجاء استخدام الأزرار فقط.", reply_markup=menu(uid))
 
 # =========================
-# بدء البوت
+# بدء البوت وتشغيل Daily Bonus
+threading.Thread(target=daily_bonus, daemon=True).start()
 bot.polling()
