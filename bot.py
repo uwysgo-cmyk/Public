@@ -5,20 +5,20 @@ import threading
 import time
 import re
 import os
+from datetime import datetime, timedelta
 
 # =========================
 # إعدادات البوت
 TOKEN = "8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ"
 CHANNEL = "https://t.me/VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
-DEVELOPER_ID = 7100818250  # رقمك الخاص على تيليغرام
+DEVELOPER_ID = 7100818250  # رقمك على Telegram
 bot = telebot.TeleBot(TOKEN)
 
 # =========================
 # قاعدة بيانات المستخدمين
 users = {}  
-# {user_id: {'points': int, 'invited': int, 'tiktok': False, 'current_action': None,
-#            'last_daily': str, 'downloads': int, 'audios': int}}
+# {user_id: {'points': int, 'invited': int, 'tiktok': False, 'current_action': None, 'last_daily': datetime}}
 
 # =========================
 # قائمة رئيسية
@@ -34,8 +34,31 @@ def menu(uid):
 # التحقق من المستخدم
 def check_user(uid):
     if uid not in users:
-        users[uid] = {'points': 5, 'invited': 0, 'tiktok': False, 'current_action': None,
-                      'last_daily': None, 'downloads': 0, 'audios': 0}
+        users[uid] = {
+            'points': 5,
+            'invited': 0,
+            'tiktok': False,
+            'current_action': None,
+            'last_daily': datetime.min
+        }
+
+# =========================
+# إضافة النقطة اليومية
+def daily_points():
+    while True:
+        now = datetime.now()
+        for uid, data in users.items():
+            if now - data['last_daily'] >= timedelta(hours=24):
+                data['points'] += 1
+                data['last_daily'] = now
+                try:
+                    bot.send_message(uid, f"🌟 تم إضافة نقطة يومية لك!\n🔹 نقاطك: {data['points']}")
+                except:
+                    pass
+        time.sleep(3600)  # فحص كل ساعة
+
+# بدء الخيط للنقطة اليومية
+threading.Thread(target=daily_points, daemon=True).start()
 
 # =========================
 # إضافة نقاط تيكتوك بعد 7 ثوانٍ
@@ -52,33 +75,16 @@ def is_url(text):
 
 # =========================
 # إرسال الملف بعد التحميل
-def send_file(uid, filename, action_type):
+def send_file(uid, filename):
     try:
         with open(filename, "rb") as f:
             if filename.endswith(".mp3"):
                 bot.send_audio(uid, f)
-                users[uid]['audios'] += 1
             else:
                 bot.send_video(uid, f)
-                users[uid]['downloads'] += 1
         os.remove(filename)
     except Exception as e:
         bot.send_message(uid, f"❌ لم أتمكن من إرسال الملف: {str(e)}")
-
-# =========================
-# Daily Bonus
-def daily_bonus():
-    while True:
-        now_day = time.strftime("%Y-%m-%d")
-        for uid in users:
-            if 'last_daily' not in users[uid] or users[uid]['last_daily'] != now_day:
-                users[uid]['points'] += 1
-                users[uid]['last_daily'] = now_day
-                try:
-                    bot.send_message(uid, f"🎁 تم إضافة نقطة يومية!\nنقاطك الآن: {users[uid]['points']}")
-                except:
-                    pass
-        time.sleep(3600)
 
 # =========================
 # استقبال الرسائل
@@ -88,13 +94,11 @@ def handle(msg):
     text = msg.text
     check_user(uid)
 
-    # زر رجوع
     if text == "↩️ رجوع":
         bot.send_message(uid, "🔙 رجعت للقائمة الرئيسية", reply_markup=menu(uid))
         users[uid]['current_action'] = None
         return
 
-    # دعوة صديق
     if text == "👥 دعوة صديق":
         link = f"{CHANNEL}?start={uid}"
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -102,7 +106,6 @@ def handle(msg):
         bot.send_message(uid, f"رابط دعوتك:\n{link}\n🔹 نقاطك: {users[uid]['points']}", reply_markup=markup)
         return
 
-    # تيكتوك
     if text == "🎯 تيكتوك":
         if not users[uid]['tiktok']:
             bot.send_message(uid, f"🔗 هذا رابط تيكتوك الخاص بك: {TIKTOK_ACCOUNT}")
@@ -111,13 +114,11 @@ def handle(msg):
             bot.send_message(uid, "لقد استخدمت هذا الخيار من قبل!")
         return
 
-    # اختيار العملية
     if text in ["📥 تحميل فيديو", "🎵 استخراج صوت"]:
         users[uid]['current_action'] = text
         bot.send_message(uid, "أرسل رابط الفيديو الآن أو أرسل ملف الفيديو:", reply_markup=types.ReplyKeyboardMarkup().add("↩️ رجوع"))
         return
 
-    # روابط فيديو
     if text and is_url(text):
         action = users[uid]['current_action']
         if not action:
@@ -130,6 +131,7 @@ def handle(msg):
                 'format': 'bestvideo+bestaudio/best',
                 'outtmpl': f'{uid}_%(title)s.%(ext)s',
                 'noplaylist': True,
+                'ffmpeg_location': '/usr/bin/ffmpeg',
             }
         elif action == "🎵 استخراج صوت":
             ydl_opts = {
@@ -141,6 +143,7 @@ def handle(msg):
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
+                'ffmpeg_location': '/usr/bin/ffmpeg',
             }
 
         try:
@@ -152,25 +155,16 @@ def handle(msg):
 
             users[uid]['points'] -= 1
             bot.send_message(uid, f"✅ تمت العملية بنجاح!\n🔹 نقاطك الحالية: {users[uid]['points']}\n📁 جاري إرسال الملف...")
-            threading.Thread(target=send_file, args=(uid, filename, action)).start()
+            threading.Thread(target=send_file, args=(uid, filename)).start()
 
         except Exception as e:
-            bot.send_message(uid, f"❌ خطأ في التحميل: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحميل.")
+            bot.send_message(uid, f"❌ خطأ في التحميل: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحويل.")
+
         users[uid]['current_action'] = None
         return
 
-    # لوحة المطور
-    if text == "👑 لوحة المطور" and uid == DEVELOPER_ID:
-        stats = "📊 إحصائيات المستخدمين اليومية:\n\n"
-        for u_id, data in users.items():
-            stats += f"👤 {u_id}\nنقاط: {data['points']}\nتحميل فيديو: {data['downloads']}\nاستخراج صوت: {data['audios']}\n\n"
-        bot.send_message(uid, stats)
-        return
-
-    # أي نص غير معروف
     bot.send_message(uid, "❌ أمر غير صالح. الرجاء استخدام الأزرار فقط.", reply_markup=menu(uid))
 
 # =========================
-# بدء البوت وتشغيل Daily Bonus
-threading.Thread(target=daily_bonus, daemon=True).start()
+# بدء البوت
 bot.polling()
