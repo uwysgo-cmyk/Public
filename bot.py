@@ -9,7 +9,7 @@ from datetime import datetime
 
 # =========================
 # إعدادات البوت
-TOKEN = os.getenv("TOKEN")  # ضع توكن البوت كمتغير بيئة
+TOKEN = os.getenv("8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ")  # ضع توكن البوت كمتغير بيئة
 CHANNEL = "https://t.me/VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
 DEVELOPER_ID = 7100818250  # رقمك على تيليغرام
