@@ -9,7 +9,7 @@ from datetime import datetime
 
 # =========================
 # إعدادات
-TOKEN = os.getenv("TOKEN")
+TOKEN = "8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ"
 CHANNEL = "https://t.me/VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
 DEVELOPER_ID = 7100818250
@@ -61,9 +61,8 @@ def is_url(text):
     return re.match(r'^https?://', text)
 
 # =========================
-# 🧠 حذف الملف بعد تأخير
 def delete_later(file):
-    time.sleep(120)  # دقيقتين
+    time.sleep(120)
     if os.path.exists(file):
         os.remove(file)
 
@@ -78,14 +77,12 @@ def send_file(uid, filename):
                 bot.send_video(uid, f)
                 users[uid]['downloads'] += 1
 
-        # حذف بعد تأخير
         threading.Thread(target=delete_later, args=(filename,)).start()
 
     except Exception as e:
         bot.send_message(uid, f"❌ خطأ إرسال الملف: {str(e)}")
 
 # =========================
-# 🎬 تحميل من رابط
 def download_media(url, uid, action):
     bot.send_message(uid, "⏳ جاري المعالجة...")
 
@@ -151,7 +148,6 @@ def handle(msg):
         bot.send_message(uid, "أرسل الرابط أو ملف فيديو")
         return
 
-    # 👑 لوحة المطور
     if text == "👑 لوحة المطور" and uid == DEVELOPER_ID:
         total_users = len(users)
         total_points = sum(u['points'] for u in users.values())
@@ -169,7 +165,6 @@ def handle(msg):
         bot.send_message(uid, msg_stats)
         return
 
-    # 🔗 رابط
     if text and is_url(text):
         action = users[uid]['current_action']
         if not action:
@@ -179,7 +174,6 @@ def handle(msg):
         threading.Thread(target=download_media, args=(text, uid, action)).start()
         return
 
-    # 📁 فيديو من الجهاز
     if msg.content_type == 'document':
         action = users[uid]['current_action']
 
