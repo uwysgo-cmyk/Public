@@ -8,9 +8,9 @@ import os
 from datetime import datetime
 
 # =========================
-# إعدادات
-TOKEN = os.getenv("TOKEN")  # ضع توكن البوت هنا كمتغير بيئة في Railway
-CHANNEL = "https://t.me/VideoExpressA"
+# إعدادات البوت
+TOKEN = os.getenv("TOKEN")  # ضع توكن البوت هنا كمتغير بيئة
+CHANNEL = "@VideoExpressA"   # معرف القناة بدون رابط كامل
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
 DEVELOPER_ID = 7100818250
 
@@ -18,7 +18,7 @@ bot = telebot.TeleBot(TOKEN)
 users = {}
 
 # =========================
-# إعداد قائمة أزرار
+# قائمة أزرار
 def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("📥 تحميل فيديو", "🎯 تيكتوك")
@@ -32,12 +32,22 @@ def menu(uid):
 def check_user(uid):
     if uid not in users:
         users[uid] = {
-            'points': 3,  # رصيد أول مرة
+            'points': 3,           # رصيد أول مرة
             'tiktok': False,
             'current_action': None,
             'last_daily': None,
-            'downloads': 0
+            'downloads': 0,
+            'invites': 0           # عداد الدعوات
         }
+
+# =========================
+# التحقق من الاشتراك بالقناة
+def is_subscribed(uid):
+    try:
+        member = bot.get_chat_member(CHANNEL, uid)
+        return member.status not in ['left', 'kicked']
+    except:
+        return False
 
 # =========================
 # هدية يومية
@@ -49,7 +59,7 @@ def daily_points():
                 users[uid]['points'] += 1
                 users[uid]['last_daily'] = today
                 try:
-                    bot.send_message(uid, "🎁 تم إضافة نقطة يومية! رصيدك الحالي: {}".format(users[uid]['points']))
+                    bot.send_message(uid, f"🎁 تم إضافة نقطة يومية! رصيدك الحالي: {users[uid]['points']}")
                 except:
                     pass
         time.sleep(3600)
@@ -105,7 +115,7 @@ def download_media(url, uid):
             filename = ydl.prepare_filename(info)
         send_file(uid, filename)
     except Exception as e:
-        bot.send_message(uid, f"❌ خطأ: {str(e)}")
+        bot.send_message(uid, f"❌ خطأ: {str(e)}\n🔹 تأكد أن الرابط صالح ويدعم التحميل.")
 
 # =========================
 # التعامل مع الرسائل
@@ -115,6 +125,11 @@ def handle(msg):
     text = msg.text
     check_user(uid)
 
+    # التحقق من الاشتراك
+    if not is_subscribed(uid):
+        bot.send_message(uid, f"⚠️ يجب عليك الاشتراك في القناة أولاً: {CHANNEL}")
+        return
+
     # زر الرجوع
     if text == "↩️ رجوع":
         bot.send_message(uid, "🔙 رجوع", reply_markup=menu(uid))
@@ -123,7 +138,8 @@ def handle(msg):
     # دعوة صديق
     if text == "👥 دعوة صديق":
         users[uid]['points'] += 3
-        link = f"{CHANNEL}?start={uid}"
+        users[uid]['invites'] += 1
+        link = f"https://t.me/{CHANNEL}?start={uid}"
         bot.send_message(uid, f"رابطك:\n{link}\n🎉 تم إضافة 3 نقاط! رصيدك: {users[uid]['points']}")
         return
 
