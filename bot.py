@@ -10,18 +10,18 @@ from datetime import datetime
 # =========================
 # إعدادات
 TOKEN = "8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ"
-CHANNEL = "https://t.me/VideoExpressA"
+CHANNEL = "@VideoExpressA"  # معرف القناة بدون https
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
 DEVELOPER_ID = 7100818250
 
 bot = telebot.TeleBot(TOKEN)
+
 users = {}
 
 # =========================
 def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📥 تحميل فيديو")
-    markup.add("👥 دعوة صديق", "🎯 تيكتوك")
+    markup.add("📥 تحميل فيديو", "👥 دعوة صديق", "🎯 تيكتوك")
     if uid == DEVELOPER_ID:
         markup.add("👑 لوحة المطور")
     return markup
@@ -30,16 +30,27 @@ def menu(uid):
 def check_user(uid):
     if uid not in users:
         users[uid] = {
-            'points': 5,
+            'points': 3,  # الرصيد الابتدائي
             'tiktok': False,
             'current_action': None,
             'last_daily': None,
             'downloads': 0,
-            'invites': 0
+            'audios': 0
         }
 
 # =========================
-# 🎁 هدية يومية
+# التحقق من اشتراك المستخدم بالقناة
+def is_subscribed(uid):
+    try:
+        member = bot.get_chat_member(chat_id=CHANNEL, user_id=uid)
+        if member.status in ["member", "creator", "administrator"]:
+            return True
+        return False
+    except:
+        return False
+
+# =========================
+# هدية يومية (يمكن تعديل لاحقًا)
 def daily_points():
     while True:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -60,7 +71,6 @@ def is_url(text):
     return re.match(r'^https?://', text)
 
 # =========================
-# 🧠 حذف الملف بعد تأخير
 def delete_later(file):
     time.sleep(120)
     if os.path.exists(file):
@@ -69,24 +79,38 @@ def delete_later(file):
 # =========================
 def send_file(uid, filename):
     try:
+        if users[uid]['points'] <= 0:
+            bot.send_message(uid, "❌ رصيدك انتهى، لا يمكن إتمام العملية.")
+            return
+
         with open(filename, "rb") as f:
             bot.send_video(uid, f)
             users[uid]['downloads'] += 1
 
         threading.Thread(target=delete_later, args=(filename,)).start()
+        users[uid]['points'] -= 1
+        bot.send_message(uid, f"✅ تم بنجاح! رصيدك الآن: {users[uid]['points']} نقطة")
 
     except Exception as e:
         bot.send_message(uid, f"❌ خطأ إرسال الملف: {str(e)}")
 
 # =========================
-# 🎬 تحميل فيديو من رابط
 def download_media(url, uid):
-    bot.send_message(uid, "⏳ جاري المعالجة...")
+    if users[uid]['points'] <= 0:
+        bot.send_message(uid, "❌ رصيدك انتهى، لا يمكن إتمام العملية.")
+        return
+
+    if not is_subscribed(uid):
+        bot.send_message(uid, f"❌ يجب عليك الانضمام إلى القناة أولاً: {CHANNEL}")
+        return
+
+    bot.send_message(uid, "⏳ جاري التحميل...")
+
     ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
         'outtmpl': f'{uid}_%(title)s.%(ext)s',
         'noplaylist': True,
-        'ffmpeg_location': '/usr/bin/ffmpeg'
+        'ffmpeg_location': '/usr/bin/ffmpeg',
+        'format': 'bestvideo+bestaudio/best'
     }
 
     try:
@@ -94,52 +118,50 @@ def download_media(url, uid):
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
 
-        users[uid]['points'] -= 1
-        bot.send_message(uid, "✅ تم تحميل الفيديو، جاري الإرسال...")
         send_file(uid, filename)
 
     except Exception as e:
         bot.send_message(uid, f"❌ خطأ: {str(e)}")
 
 # =========================
-@bot.message_handler(func=lambda m: True, content_types=['text'])
+@bot.message_handler(func=lambda m: True, content_types=['text','document'])
 def handle(msg):
     uid = msg.from_user.id
     text = msg.text
     check_user(uid)
 
-    # العودة للقائمة
     if text == "↩️ رجوع":
         bot.send_message(uid, "🔙 رجوع", reply_markup=menu(uid))
-        users[uid]['current_action'] = None
         return
 
-    # رابط الدعوة
+    # الدعوة
     if text == "👥 دعوة صديق":
-        link = f"{CHANNEL}?start={uid}"
-        bot.send_message(uid, f"رابطك:\n{link}\n🔹 نقاطك: {users[uid]['points']}")
+        link = f"https://t.me/VideoExpressA?start={uid}"
+        bot.send_message(uid, f"رابطك:\n{link}")
+        users[uid]['points'] += 3
+        bot.send_message(uid, f"🎉 تم إضافة 3 نقاط لرصيدك! رصيدك الآن: {users[uid]['points']} نقطة")
         return
 
-    # تيك توك مع تأخير النقاط 7 ثوان
+    # تيكتوك
     if text == "🎯 تيكتوك":
+        if users[uid]['points'] <= 0:
+            bot.send_message(uid, "❌ رصيدك انتهى، لا يمكن إتمام العملية.")
+            return
+
+        if not is_subscribed(uid):
+            bot.send_message(uid, f"❌ يجب عليك الانضمام إلى القناة أولاً: {CHANNEL}")
+            return
+
         if not users[uid]['tiktok']:
-            bot.send_message(uid, f"تابعنا على تيك توك: {TIKTOK_ACCOUNT}")
-            
-            def give_tiktok_points():
-                time.sleep(7)
-                users[uid]['points'] += 4
-                users[uid]['tiktok'] = True
-                bot.send_message(uid, "🎯 تم إضافة نقاط التيك توك لك!")
-            
-            threading.Thread(target=give_tiktok_points).start()
-        else:
-            bot.send_message(uid, "لقد حصلت على نقاط التيك توك مسبقًا!")
+            bot.send_message(uid, TIKTOK_ACCOUNT)
+            users[uid]['points'] += 4
+            users[uid]['tiktok'] = True
+            bot.send_message(uid, f"🎉 تم إضافة 4 نقاط لرصيدك! رصيدك الآن: {users[uid]['points']} نقطة")
         return
 
-    # تحميل الفيديو
-    if text == "📥 تحميل فيديو":
-        users[uid]['current_action'] = "download"
-        bot.send_message(uid, "أرسل رابط الفيديو الآن:", reply_markup=types.ReplyKeyboardMarkup().add("↩️ رجوع"))
+    # تحميل فيديو
+    if is_url(text):
+        download_media(text, uid)
         return
 
     # لوحة المطور
@@ -147,39 +169,20 @@ def handle(msg):
         total_users = len(users)
         total_points = sum(u['points'] for u in users.values())
         total_downloads = sum(u['downloads'] for u in users.values())
-        total_tiktok = sum(1 for u in users.values() if u['tiktok'])
-        total_invites = sum(u['invites'] for u in users.values())
-
-        # زر لإضافة نقاط للجميع
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("↩️ رجوع", "➕ إضافة نقاط للجميع")
 
         msg_stats = f"""
-📊 إحصائيات المطور:
+📊 إحصائيات:
 
 👤 المستخدمين: {total_users}
 💰 مجموع النقاط: {total_points}
 🎬 تحميل فيديو: {total_downloads}
-🎯 نقاط تيك توك: {total_tiktok}
-👥 الدعوات: {total_invites}
 """
-        bot.send_message(uid, msg_stats, reply_markup=markup)
-        return
+        bot.send_message(uid, msg_stats)
 
-    # إضافة نقاط للجميع
-    if text == "➕ إضافة نقاط للجميع" and uid == DEVELOPER_ID:
-        for u in users:
-            users[u]['points'] += 5
-        bot.send_message(uid, "✅ تم إضافة 5 نقاط لكل المستخدمين!")
+        # إضافة نقاط لجميع المستخدمين (ميزة مطور)
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("➕ إضافة نقاط للجميع")
+        sent = bot.send_message(uid, "يمكنك إضافة نقاط لجميع المستخدمين:", reply_markup=markup)
         return
-
-    # معالجة رابط الفيديو
-    if text and is_url(text):
-        if users[uid]['current_action'] == "download":
-            threading.Thread(target=download_media, args=(text, uid)).start()
-            return
-        else:
-            bot.send_message(uid, "❌ اختر العملية أولاً")
-            return
 
 bot.polling()
