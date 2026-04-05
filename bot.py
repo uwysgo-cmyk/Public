@@ -80,7 +80,7 @@ def check_join(uid):
         return False
 
 # =========================
-# هدية يومية
+# هدية يومية (تعمل في الخلفية)
 def daily_points():
     while True:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -89,7 +89,7 @@ def daily_points():
                 users[uid]['points'] += 1
                 users[uid]['last_daily'] = today
         save_users()
-        time.sleep(3600)
+        time.sleep(3600)  # فحص كل ساعة
 
 threading.Thread(target=daily_points, daemon=True).start()
 
@@ -112,10 +112,12 @@ def send_file(uid, filename):
     try:
         with open(filename, "rb") as f:
             bot.send_video(uid, f)
+
         users[uid]['downloads'] += 1
         if not is_vip(uid):
             users[uid]['points'] = max(0, users[uid]['points'] - 1)
         save_users()
+
         threading.Thread(target=delete_later, args=(filename,)).start()
         remaining_points = users[uid]['points'] if not is_vip(uid) else "∞"
         bot.send_message(uid, f"✅ تم الإرسال!\n💰 رصيدك: {remaining_points}", reply_markup=menu(uid))
@@ -131,7 +133,9 @@ def download_media(url, uid):
     if not any(site in url for site in ["youtube", "youtu.be", "tiktok", "instagram"]):
         bot.send_message(uid, "❌ هذا الرابط غير مدعوم", reply_markup=menu(uid))
         return
+
     bot.send_message(uid, "📥 جاري المعالجة...\n⏳ انتظر قليلاً", reply_markup=menu(uid))
+
     ydl_opts = {
         'outtmpl': f'{uid}_%(title)s.%(ext)s',
         'noplaylist': True,
@@ -139,13 +143,17 @@ def download_media(url, uid):
         'ffmpeg_location': '/usr/bin/ffmpeg',
         'max_filesize': 50 * 1024 * 1024
     }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-        send_file(uid, filename)
-    except Exception as e:
-        bot.send_message(uid, f"❌ خطأ: {str(e)}", reply_markup=menu(uid))
+
+    def worker():
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+            send_file(uid, filename)
+        except Exception as e:
+            bot.send_message(uid, f"❌ خطأ: {str(e)}", reply_markup=menu(uid))
+
+    threading.Thread(target=worker).start()  # تنزيل في خيط مستقل
 
 # =========================
 def is_vip(uid):
@@ -161,21 +169,11 @@ def is_vip(uid):
     return False
 
 # =========================
-# متابعة الهدايا في القناة (VIP تلقائي)
-@bot.channel_post_handler(func=lambda m: True)
-def handle_channel_post(msg):
-    if hasattr(msg, 'via_bot') and msg.via_bot:
-        sender_id = msg.sender_chat.id if hasattr(msg, 'sender_chat') else None
-        if sender_id and str(sender_id) in users:
-            users[str(sender_id)]['vip_until'] = (datetime.now() + timedelta(days=VIP_DURATION_DAYS)).isoformat()
-            save_users()
-            bot.send_message(sender_id, f"💎 تهانينا! VIP تلقائي لمدة {VIP_DURATION_DAYS} يوم على هديتك 🎉")
-
-# =========================
 @bot.message_handler(commands=['start'])
 def start(msg):
     uid = str(msg.from_user.id)
     check_user(uid)
+
     args = msg.text.split()
     if len(args) > 1:
         inviter = args[1]
@@ -190,6 +188,7 @@ def start(msg):
                     users[inviter]['vip_until'] = (datetime.now() + timedelta(days=VIP_DURATION_DAYS)).isoformat()
                     bot.send_message(inviter, f"💎 تهانينا! VIP لمدة {VIP_DURATION_DAYS} يوم")
                 save_users()
+
     bot.send_message(uid, "👋 مرحبًا بك!", reply_markup=menu(uid))
 
 # =========================
@@ -198,11 +197,15 @@ def handle(msg):
     uid = str(msg.from_user.id)
     text = msg.text
     check_user(uid)
+
+    # حماية سبام
     now = time.time()
     if uid in last_request and now - last_request[uid] < 3:
         bot.send_message(uid, "⏳ انتظر قليلاً", reply_markup=menu(uid))
         return
     last_request[uid] = now
+
+    # تحقق الانضمام
     if not check_join(uid):
         return
 
@@ -242,12 +245,10 @@ def handle(msg):
         return
 
     if text == "👑 لوحة المطور" and int(uid) == DEVELOPER_ID:
-        stats = f"""
-👤 المستخدمين: {len(users)}
+        stats = f"""👤 المستخدمين: {len(users)}
 💰 مجموع النقاط: {sum(u['points'] for u in users.values())}
 📥 مجموع التحميلات: {sum(u['downloads'] for u in users.values())}
-💎 VIP نشط: {sum(1 for u in users.values() if is_vip(u))}
-"""
+💎 VIP نشط: {sum(1 for u in users.values() if is_vip(u))}"""
         bot.send_message(uid, stats, reply_markup=menu(uid))
         return
 
@@ -255,10 +256,10 @@ def handle(msg):
         if users[uid]['current_action'] != "download":
             bot.send_message(uid, "❌ اختر تحميل فيديو أولاً", reply_markup=menu(uid))
             return
-        threading.Thread(target=download_media, args=(text, uid)).start()
+        download_media(text, uid)
         return
 
     bot.send_message(uid, "⚠️ استخدم الأزرار فقط", reply_markup=menu(uid))
 
 # =========================
-bot.polling(none_stop=True)
+bot.polling()
