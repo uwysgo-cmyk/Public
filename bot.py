@@ -9,51 +9,35 @@ from datetime import datetime
 
 # =========================
 # إعدادات
-TOKEN = "8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ"  # توكن البوت
-CHANNEL = "@VideoExpressA"  # معرف القناة (بدون رابط كامل)
+TOKEN = os.getenv("TOKEN")  # ضع توكن البوت هنا كمتغير بيئة في Railway
+CHANNEL = "https://t.me/VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
-DEVELOPER_ID = 7100818250  # معرفك كمالك للبوت
+DEVELOPER_ID = 7100818250
 
 bot = telebot.TeleBot(TOKEN)
 users = {}
 
 # =========================
-# فحص المستخدم وإعطاء رصيد البداية
-def check_user(uid):
-    if uid not in users:
-        users[uid] = {
-            'points': 3,          # رصيد البداية
-            'tiktok': False,
-            'current_action': None,
-            'last_daily': None,
-            'downloads': 0,
-            'audios': 0
-        }
-
-# =========================
-# قائمة الأزرار
+# إعداد قائمة أزرار
 def menu(uid):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📥 تحميل فيديو")  # إزالة خيار استخراج الصوت حسب طلبك
-    markup.add("👥 دعوة صديق", "🎯 تيكتوك")
+    markup.add("📥 تحميل فيديو", "🎯 تيكتوك")
+    markup.add("👥 دعوة صديق")
     if uid == DEVELOPER_ID:
         markup.add("👑 لوحة المطور")
     return markup
 
-# زر رجوع
-def back_button():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("↩️ رجوع")
-    return markup
-
 # =========================
-# فحص الانضمام للقناة
-def is_subscribed(uid):
-    try:
-        member = bot.get_chat_member(CHANNEL, uid)
-        return member.status in ['member', 'creator', 'administrator']
-    except:
-        return False
+# التحقق من المستخدم
+def check_user(uid):
+    if uid not in users:
+        users[uid] = {
+            'points': 3,  # رصيد أول مرة
+            'tiktok': False,
+            'current_action': None,
+            'last_daily': None,
+            'downloads': 0
+        }
 
 # =========================
 # هدية يومية
@@ -65,7 +49,7 @@ def daily_points():
                 users[uid]['points'] += 1
                 users[uid]['last_daily'] = today
                 try:
-                    bot.send_message(uid, "🎁 تم إضافة نقطة يومية!")
+                    bot.send_message(uid, "🎁 تم إضافة نقطة يومية! رصيدك الحالي: {}".format(users[uid]['points']))
                 except:
                     pass
         time.sleep(3600)
@@ -87,26 +71,31 @@ def delete_later(file):
 # =========================
 # إرسال الملفات
 def send_file(uid, filename):
+    if users[uid]['points'] <= 0:
+        bot.send_message(uid, "❌ لا يمكنك الاستمرار، رصيدك صفر.")
+        return
     try:
         with open(filename, "rb") as f:
             bot.send_video(uid, f)
             users[uid]['downloads'] += 1
+            users[uid]['points'] -= 1
         threading.Thread(target=delete_later, args=(filename,)).start()
+        bot.send_message(uid, f"✅ تم الإرسال بنجاح! رصيدك الحالي: {users[uid]['points']}")
     except Exception as e:
         bot.send_message(uid, f"❌ خطأ إرسال الملف: {str(e)}")
 
 # =========================
-# تحميل من رابط
+# تحميل الفيديو
 def download_media(url, uid):
     if users[uid]['points'] <= 0:
-        bot.send_message(uid, "❌ انتهى رصيدك، أضف صديقًا أو اضغط على تيكتوك للحصول على نقاط")
+        bot.send_message(uid, "❌ لا يمكنك الاستمرار، رصيدك صفر.")
         return
 
-    bot.send_message(uid, "⏳ جاري المعالجة...")
-
+    bot.send_message(uid, "⏳ جاري تحميل الفيديو...")
     ydl_opts = {
         'outtmpl': f'{uid}_%(title)s.%(ext)s',
         'noplaylist': True,
+        'format': 'bestvideo+bestaudio/best',
         'ffmpeg_location': '/usr/bin/ffmpeg'
     }
 
@@ -114,11 +103,7 @@ def download_media(url, uid):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-
-        users[uid]['points'] -= 1
-        bot.send_message(uid, f"✅ تم بنجاح! رصيدك الآن: {users[uid]['points']} نقاط")
         send_file(uid, filename)
-
     except Exception as e:
         bot.send_message(uid, f"❌ خطأ: {str(e)}")
 
@@ -130,37 +115,32 @@ def handle(msg):
     text = msg.text
     check_user(uid)
 
-    # التحقق من الاشتراك بالقناة
-    if not is_subscribed(uid):
-        bot.send_message(uid, f"❌ يجب أن تنضم إلى القناة {CHANNEL} أولاً لتستخدم البوت")
-        return
-
-    # زر رجوع
+    # زر الرجوع
     if text == "↩️ رجوع":
         bot.send_message(uid, "🔙 رجوع", reply_markup=menu(uid))
-        users[uid]['current_action'] = None
         return
 
     # دعوة صديق
     if text == "👥 دعوة صديق":
-        link = f"https://t.me/{CHANNEL}?start={uid}"
-        bot.send_message(uid, f"رابطك:\n{link}\n✅ تم إضافة 3 نقاط عند انضمام صديقك")
         users[uid]['points'] += 3
+        link = f"{CHANNEL}?start={uid}"
+        bot.send_message(uid, f"رابطك:\n{link}\n🎉 تم إضافة 3 نقاط! رصيدك: {users[uid]['points']}")
         return
 
     # تيكتوك
     if text == "🎯 تيكتوك":
         if not users[uid]['tiktok']:
-            bot.send_message(uid, TIKTOK_ACCOUNT)
             users[uid]['points'] += 4
             users[uid]['tiktok'] = True
-            bot.send_message(uid, f"✅ تم إضافة 4 نقاط! رصيدك الآن: {users[uid]['points']}")
+            bot.send_message(uid, f"{TIKTOK_ACCOUNT}\n🎉 تم إضافة 4 نقاط! رصيدك: {users[uid]['points']}")
+        else:
+            bot.send_message(uid, "✅ لقد استلمت رابط تيكتوك مسبقًا.")
         return
 
     # تحميل فيديو
     if text == "📥 تحميل فيديو":
-        users[uid]['current_action'] = text
-        bot.send_message(uid, "📎 أرسل رابط الفيديو", reply_markup=back_button())
+        users[uid]['current_action'] = "download"
+        bot.send_message(uid, "أرسل رابط الفيديو للتحميل")
         return
 
     # لوحة المطور
@@ -168,44 +148,26 @@ def handle(msg):
         total_users = len(users)
         total_points = sum(u['points'] for u in users.values())
         total_downloads = sum(u['downloads'] for u in users.values())
-
         msg_stats = f"""
-📊 إحصائيات البوت:
-
+📊 إحصائيات:
 👤 المستخدمين: {total_users}
 💰 مجموع النقاط: {total_points}
 🎬 تحميل فيديو: {total_downloads}
 """
         bot.send_message(uid, msg_stats)
-
-        # خيار لإضافة نقاط للجميع
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("↩️ رجوع")
-        markup.add("➕ إضافة نقاط للجميع")
-        bot.send_message(uid, "اختر العملية:", reply_markup=markup)
         return
 
-    # إضافة نقاط للجميع (خاصية المطور)
-    if text == "➕ إضافة نقاط للجميع" and uid == DEVELOPER_ID:
-        for u in users:
-            users[u]['points'] += 3
-        bot.send_message(uid, "✅ تم إضافة 3 نقاط لكل المستخدمين")
-        return
-
-    # رابط
+    # التحقق من الرابط
     if text and is_url(text):
         action = users[uid]['current_action']
-        if not action:
-            bot.send_message(uid, "❌ اختر العملية أولاً")
+        if action != "download":
+            bot.send_message(uid, "❌ اختر العملية أولاً (تحميل فيديو)")
             return
-
         threading.Thread(target=download_media, args=(text, uid)).start()
         return
 
-    # أي شيء آخر
-    if text and not is_url(text):
-        bot.send_message(uid, "❌ هذا ليس رابطًا، الرجاء إرسال رابط صالح")
-        return
+    # إدخال غير صالح
+    bot.send_message(uid, "⚠️ هذا ليس رابطًا صالحًا أو أمرًا معروفًا. الرجاء استخدام الأزرار أسفل الشاشة.")
 
 # =========================
 bot.polling()
