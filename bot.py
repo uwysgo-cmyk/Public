@@ -35,8 +35,15 @@ def save_users():
 users = load_users()
 
 # =========================
-# حماية سبام
+# حماية سبام محسّنة
 last_request = {}
+
+def can_request(uid):
+    now = time.time()
+    if uid in last_request and now - last_request[uid] < 2:  # تقليل وقت الانتظار
+        return False
+    last_request[uid] = now
+    return True
 
 # =========================
 # القائمة
@@ -80,16 +87,19 @@ def check_join(uid):
         return False
 
 # =========================
-# هدية يومية (تعمل في الخلفية)
+# هدية يومية
 def daily_points():
     while True:
         today = datetime.now().strftime("%Y-%m-%d")
+        updated = False
         for uid in users:
             if users[uid]['last_daily'] != today:
                 users[uid]['points'] += 1
                 users[uid]['last_daily'] = today
-        save_users()
-        time.sleep(3600)  # فحص كل ساعة
+                updated = True
+        if updated:
+            save_users()
+        time.sleep(3600)
 
 threading.Thread(target=daily_points, daemon=True).start()
 
@@ -169,6 +179,17 @@ def is_vip(uid):
     return False
 
 # =========================
+def dev_stats():
+    total_users = len(users)
+    total_points = sum(u['points'] for u in users.values())
+    total_downloads = sum(u['downloads'] for u in users.values())
+    total_vip = sum(1 for u in users.values() if is_vip(u))
+    return f"""👤 المستخدمين: {total_users}
+💰 مجموع النقاط: {total_points}
+📥 مجموع التحميلات: {total_downloads}
+💎 VIP نشط: {total_vip}"""
+
+# =========================
 @bot.message_handler(commands=['start'])
 def start(msg):
     uid = str(msg.from_user.id)
@@ -198,20 +219,16 @@ def handle(msg):
     text = msg.text
     check_user(uid)
 
-    # حماية سبام
-    now = time.time()
-    if uid in last_request and now - last_request[uid] < 3:
+    if not can_request(uid):
         bot.send_message(uid, "⏳ انتظر قليلاً", reply_markup=menu(uid))
         return
-    last_request[uid] = now
 
-    # تحقق الانضمام
     if not check_join(uid):
         return
 
     if text == "👥 دعوة صديق":
         link = f"https://t.me/{CHANNEL.replace('@','')}?start={uid}"
-        bot.send_message(uid, f"🔗 رابطك:\n{link}", reply_markup=menu(uid))
+        bot.send_message(uid, f"🔗 رابطك:\n{link}\n🎯 شاركه للحصول على نقاط إضافية!", reply_markup=menu(uid))
         return
 
     if text == "🎯 تيكتوك":
@@ -245,11 +262,7 @@ def handle(msg):
         return
 
     if text == "👑 لوحة المطور" and int(uid) == DEVELOPER_ID:
-        stats = f"""👤 المستخدمين: {len(users)}
-💰 مجموع النقاط: {sum(u['points'] for u in users.values())}
-📥 مجموع التحميلات: {sum(u['downloads'] for u in users.values())}
-💎 VIP نشط: {sum(1 for u in users.values() if is_vip(u))}"""
-        bot.send_message(uid, stats, reply_markup=menu(uid))
+        bot.send_message(uid, dev_stats(), reply_markup=menu(uid))
         return
 
     if text and is_url(text):
