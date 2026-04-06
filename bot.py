@@ -178,13 +178,11 @@ def is_vip(uid):
             save_users()
     return False
 
-# =========================
+# ========================
 def dev_stats():
-    total_users = len(users)
+    total_users = users(users(users)
     total_points = sum(u['points'] for u in users.values())
-    total_downloads = sum(u['downloads'] for u in users.values())
-    total_vip = sum(1 for u in users.values() if is_vip(u))
-    return f"""👤 المستخدمين: {total_users}
+    total_vip = sum(1 for uid in users if is_vip(uid))
 💰 مجموع النقاط: {total_points}
 📥 مجموع التحميلات: {total_downloads}
 💎 VIP نشط: {total_vip}"""
@@ -217,9 +215,9 @@ def start(msg):
 def handle(msg):
     uid = str(msg.from_user.id)
     text = msg.text
-    check_user(uid)
+    check_user(uid) 
 
-    if not can_request(uid):
+    ihandle can_request(uid):
         bot.send_message(uid, "⏳ انتظر قليلاً", reply_markup=menu(uid))
         return
 
