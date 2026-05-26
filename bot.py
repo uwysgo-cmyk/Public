@@ -10,7 +10,7 @@ from datetime import datetime
 # ==========================================
 # إعدادات البوت الأساسية والروابط الخاصة بك
 # ==========================================
-TOKEN = "8600251500:AAH1eo_1QzM4tTNPF2Vb_MxzYgkasMqK6CQ"
+TOKEN = "8600251500:AAFwS2pLHgCpCa099mX2lHXirw3x-DGrov8"
 CHANNEL = "@VideoExpressA"
 TIKTOK_ACCOUNT = "https://www.tiktok.com/@a_max24"
 DEVELOPER_ID = 7100818250
