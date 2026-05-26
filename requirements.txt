@@ -1,3 +1,3 @@
 pyTelegramBotAPI==4.26.0
-yt-dlp==2025.02.20
+yt-dlp
 static-ffmpeg==2.5.2
